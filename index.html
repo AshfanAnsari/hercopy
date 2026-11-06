@@ -107,7 +107,7 @@
 
     <div class="card" style="margin-top:18px">
       <label class="lbl">Apni handwriting clone karo</label>
-      <p class="hint" style="margin:0 0 10px">Ek saaf page par A–Z, a–z aur 0–9 bade-bade, alag-alag likho — har akshar 2–3 baar, ek akshar ki saari baar ek saath (jaise A A A, phir B B B). Uski photo yahan do — site har akshar kaat kar tumhari apni handwriting bana legi. Aksharon ke size bhi waise hi rahenge jaise tum likhte ho — bade akshar bade, chhote chhote.</p>
+      <p class="hint" style="margin:0 0 10px">Ek saaf page par A–Z, a–z aur 0–9 bade-bade, alag-alag likho — har akshar sirf EK baar, sahi order me (pehle A se Z, phir a se z, phir 0 se 9). Uski photo yahan do — site har akshar kaat kar tumhari apni handwriting bana legi. Aksharon ke size bhi waise hi rahenge jaise tum likhte ho — bade akshar bade, chhote chhote.</p>
       <div class="actions" style="margin-top:0">
         <label class="upBtn" for="cloneFile">Alphabet wali photo do</label>
         <input type="file" id="cloneFile" accept="image/*" hidden>
@@ -416,7 +416,12 @@
     });
     // map onto the expected sequence: A-Z, a-z, 0-9, each written 1-3 times
     var SEQ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    var reps = Math.max(1, Math.min(3, Math.round(glyphs.length / SEQ.length)));
+    // One pass per letter is the expected sheet (62 glyphs). Only trust a
+    // 2x/3x reading when the count lands very close to 124/186 — a loose
+    // guess here is what scrambles the mapping into gibberish.
+    var reps = 1;
+    if (glyphs.length >= 170 && glyphs.length <= 196) reps = 3;
+    else if (glyphs.length >= 112 && glyphs.length <= 136) reps = 2;
     var expected = [];
     for (var s = 0; s < SEQ.length; s++) for (var r2 = 0; r2 < reps; r2++) expected.push(SEQ[s]);
     var n = Math.min(glyphs.length, expected.length);
