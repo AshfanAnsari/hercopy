@@ -242,7 +242,7 @@
     return lines;
   }
 
-  // ---------- Calligraphr font: a real .ttf made from her hand ----------
+  // ---------- Custom handwriting font: a real .ttf made from her hand ----------
   // A font file cannot scramble letters the way cut-out pieces can, so this
   // is the primary path. The uploaded font is kept in IndexedDB on this
   // device and re-applied automatically on the next visit.
@@ -301,7 +301,7 @@
       return applyCustomFont(buf, f.name).then(function () {
         return idbRun('readwrite', function (st) { return st.put({ buf: buf, name: f.name }, 'customFont'); }).catch(function () {});
       });
-    }).catch(function () { setStatus('fontStatus', 'Ye font file nahi chali — Calligraphr se download ki hui .ttf file hi do.'); });
+    }).catch(function () { setStatus('fontStatus', 'Ye font file nahi chali — sahi .ttf file hi do.'); });
   });
   var fontReset = document.getElementById('fontResetBtn');
   if (fontReset) fontReset.addEventListener('click', function () {
