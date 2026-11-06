@@ -119,11 +119,23 @@
 
   function jitterChar(ch) {
     if (GLYPHS && GLYPHS[ch] && GLYPHS[ch].length) {
-      var srcs = GLYPHS[ch];
+      var opts = GLYPHS[ch];
+      var pick = opts[Math.floor(Math.random() * opts.length)];
       var img = document.createElement('img');
       img.className = 'glyph';
       img.alt = ch;
-      img.src = srcs[Math.floor(Math.random() * srcs.length)];
+      if (typeof pick === 'string') {
+        img.src = pick;
+      } else {
+        img.src = pick.src;
+        // h = her letter scaled to this page's x-height; dy = baseline shift
+        // (positive drops descenders like p/g/y below the line, as she writes).
+        if (pick.h) img.style.height = pick.h + 'px';
+        var dy = typeof pick.dy === 'number' ? pick.dy : 0;
+        var rot = (Math.random() * 2.4 - 1.2).toFixed(2);
+        img.style.transform = 'translateY(' + dy + 'px) rotate(' + rot + 'deg)';
+        img.style.opacity = (0.88 + Math.random() * 0.12).toFixed(2);
+      }
       return img;
     }
     var s = document.createElement('span');
@@ -148,13 +160,32 @@
     return div;
   }
 
-  function wrap(text, limit) {
+  // Her cut-out letters are wider than font letters, so lines wrap by
+  // measured pixel width (her variant widths are baked into glyphs.json),
+  // not by character count — otherwise glyph-heavy lines spill off the page.
+  var LINE_BUDGET = 650;
+  function charW(ch) {
+    if (GLYPHS && GLYPHS[ch] && GLYPHS[ch].length) {
+      var opts = GLYPHS[ch], sum = 0, n = 0;
+      for (var i = 0; i < opts.length; i++) {
+        if (typeof opts[i] !== 'string' && opts[i].w) { sum += opts[i].w; n++; }
+      }
+      if (n) return sum / n + 1.5;
+    }
+    return 10.4;
+  }
+  function textW(s) {
+    var w = 0;
+    for (var i = 0; i < s.length; i++) w += s[i] === ' ' ? 6 : charW(s[i]);
+    return w;
+  }
+  function wrap(text) {
     var words = text.split(/\s+/).filter(Boolean);
     var lines = [], cur = '';
     words.forEach(function (w) {
       var next = cur ? cur + ' ' + w : w;
-      if (next.length <= limit) { cur = next; }
-      else { if (cur) lines.push(cur); cur = w; }
+      if (textW(next) <= LINE_BUDGET || !cur) { cur = next; }
+      else { lines.push(cur); cur = w; }
     });
     if (cur) lines.push(cur);
     return lines;
@@ -175,7 +206,7 @@
     var bodyLines = [];
     bodyText.split('\n').forEach(function (para) {
       if (!para.trim()) { bodyLines.push(''); return; }
-      wrap(para.trim(), CHARS_PER_LINE).forEach(function (l) { bodyLines.push(l); });
+      wrap(para.trim()).forEach(function (l) { bodyLines.push(l); });
     });
     while (bodyLines.length && bodyLines[bodyLines.length - 1] === '') bodyLines.pop();
 
