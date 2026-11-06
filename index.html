@@ -45,6 +45,8 @@
   #makeBtn { background: var(--accent); color: #fff; }
   #printBtn { background: #fff; color: var(--accent); }
   button:disabled { opacity: .45; cursor: default; }
+  .upBtn { font: bold 16px Georgia, serif; padding: 12px 22px; border-radius: 10px; border: 1px solid var(--accent); cursor: pointer; background: var(--accent); color: #fff; display: inline-block; }
+  .upBtn.alt { background: #fff; color: var(--accent); }
   #pageInfo { margin: 14px 0 0; font-size: 14px; color: #5c5546; min-height: 18px; }
   #pages { margin-top: 18px; display: flex; flex-direction: column; gap: 26px; align-items: center; }
 
@@ -102,6 +104,31 @@
       </div>
       <p id="pageInfo"></p>
     </div>
+
+    <div class="card" style="margin-top:18px">
+      <label class="lbl">Apni handwriting clone karo</label>
+      <p class="hint" style="margin:0 0 10px">Ek saaf page par A–Z, a–z aur 0–9 bade-bade, alag-alag likho — har akshar 2–3 baar, ek akshar ki saari baar ek saath (jaise A A A, phir B B B). Uski photo yahan do — site har akshar kaat kar tumhari apni handwriting bana legi. Aksharon ke size bhi waise hi rahenge jaise tum likhte ho — bade akshar bade, chhote chhote.</p>
+      <div class="actions" style="margin-top:0">
+        <label class="upBtn" for="cloneFile">Alphabet wali photo do</label>
+        <input type="file" id="cloneFile" accept="image/*" hidden>
+        <button id="saveCloneBtn" type="button" disabled>Handwriting file save karo</button>
+        <label class="upBtn alt" for="loadCloneFile">Purani file load karo</label>
+        <input type="file" id="loadCloneFile" accept="application/json" hidden>
+      </div>
+      <p class="hint" id="cloneStatus"></p>
+      <div class="toggleRow">
+        <span class="switch"><input type="checkbox" id="useClone" checked><span class="track"></span></span>
+        <span class="tlabel">Clone ki hui handwriting use karo</span>
+      </div>
+
+      <label class="lbl" style="margin-top:20px">Page ki photo se poora page banao</label>
+      <p class="hint" style="margin:0 0 10px">Kisi likhe hue page ki photo do — uska text padh kar upar wale box me aa jayega. Galtiyan sudhar kar "Pages banao" dabao — poora page tumhari clone handwriting me ban jayega.</p>
+      <div class="actions" style="margin-top:0">
+        <label class="upBtn" for="pageFile">Page ki photo do</label>
+        <input type="file" id="pageFile" accept="image/*" hidden>
+      </div>
+      <p class="hint" id="pageStatus"></p>
+    </div>
   </div>
   <div id="pages"></div>
 </div>
@@ -118,8 +145,9 @@
   var LINES_PAGE1 = 24, LINES_PAGE = 27;
 
   function jitterChar(ch) {
-    if (GLYPHS && GLYPHS[ch] && GLYPHS[ch].length) {
-      var opts = GLYPHS[ch];
+    var SET = activeSet();
+    if (SET && SET[ch] && SET[ch].length) {
+      var opts = SET[ch];
       var pick = opts[Math.floor(Math.random() * opts.length)];
       var img = document.createElement('img');
       img.className = 'glyph';
@@ -165,8 +193,9 @@
   // not by character count — otherwise glyph-heavy lines spill off the page.
   var LINE_BUDGET = 640;
   function charW(ch) {
-    if (GLYPHS && GLYPHS[ch] && GLYPHS[ch].length) {
-      var opts = GLYPHS[ch], sum = 0, n = 0;
+    var SET = activeSet();
+    if (SET && SET[ch] && SET[ch].length) {
+      var opts = SET[ch], sum = 0, n = 0;
       for (var i = 0; i < opts.length; i++) {
         if (typeof opts[i] !== 'string' && opts[i].w) { sum += opts[i].w; n++; }
       }
@@ -190,6 +219,323 @@
     if (cur) lines.push(cur);
     return lines;
   }
+
+  // ---------- handwriting clone: alphabet photo -> per-letter cut-outs ----------
+  // The user uploads one photo of A-Z / a-z / 0-9 written big and separate.
+  // Letters are cut out right here in the browser, tinted to the page ink,
+  // and sized from the sheet itself: her x-height sets the scale, and every
+  // letter keeps its own natural height (tall letters tall, descenders low).
+  var CLONE = null;
+  try { var savedClone = localStorage.getItem('hercopyClone'); if (savedClone) CLONE = JSON.parse(savedClone); } catch (e) { CLONE = null; }
+
+  function activeSet() {
+    var uc = document.getElementById('useClone');
+    if (CLONE && uc && uc.checked) return CLONE;
+    return GLYPHS;
+  }
+  function setStatus(id, msg) { var el = document.getElementById(id); if (el) el.textContent = msg; }
+
+  function loadImageFile(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  function inkData(img) {
+    var MAXW = 1500;
+    var scale = Math.min(1, MAXW / img.naturalWidth);
+    var w = Math.round(img.naturalWidth * scale), h = Math.round(img.naturalHeight * scale);
+    var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, w, h);
+    var data = ctx.getImageData(0, 0, w, h).data;
+    // Paper estimate: the BRIGHTEST luminance in each 16px cell. (Averaging
+    // fails here — the ink itself darkens its own cell and strokes shatter.)
+    var CELL = 16;
+    var gw = Math.ceil(w / CELL), gh = Math.ceil(h / CELL);
+    var grid = new Float32Array(gw * gh);
+    for (var gy = 0; gy < gh; gy++) {
+      for (var gx = 0; gx < gw; gx++) {
+        var mx = 0;
+        for (var yy = gy * CELL; yy < Math.min(h, (gy + 1) * CELL); yy++) {
+          for (var xx = gx * CELL; xx < Math.min(w, (gx + 1) * CELL); xx++) {
+            var ii = (yy * w + xx) * 4;
+            var ll = 0.299 * data[ii] + 0.587 * data[ii + 1] + 0.114 * data[ii + 2];
+            if (ll > mx) mx = ll;
+          }
+        }
+        grid[gy * gw + gx] = mx;
+      }
+    }
+    function paperAt(x, y) {
+      var fx = Math.max(0, Math.min(gw - 1.001, x / CELL - 0.5));
+      var fy = Math.max(0, Math.min(gh - 1.001, y / CELL - 0.5));
+      var x0 = Math.floor(fx), y0 = Math.floor(fy);
+      var x1 = Math.min(gw - 1, x0 + 1), y1 = Math.min(gh - 1, y0 + 1);
+      var tx = fx - x0, ty = fy - y0;
+      var top = grid[y0 * gw + x0] * (1 - tx) + grid[y0 * gw + x1] * tx;
+      var bot = grid[y1 * gw + x0] * (1 - tx) + grid[y1 * gw + x1] * tx;
+      return top * (1 - ty) + bot * ty;
+    }
+    var mask = new Uint8Array(w * h);
+    for (var y2 = 0; y2 < h; y2++) {
+      for (var x2 = 0; x2 < w; x2++) {
+        var i2 = (y2 * w + x2) * 4;
+        var r = data[i2], g = data[i2 + 1], b = data[i2 + 2];
+        var lum2 = 0.299 * r + 0.587 * g + 0.114 * b;
+        var plum = paperAt(x2, y2);
+        if (lum2 < plum - 34 || (b - r > 16 && lum2 < plum - 8)) mask[y2 * w + x2] = 1;
+      }
+    }
+    return { mask: mask, w: w, h: h, canvas: cv };
+  }
+
+  function componentsOf(mask, w, h) {
+    var seen = new Uint8Array(w * h);
+    var comps = [];
+    var stack = [];
+    for (var start = 0; start < w * h; start++) {
+      if (!mask[start] || seen[start]) continue;
+      var x0 = w, y0 = h, x1 = 0, y1 = 0, area = 0;
+      stack.length = 0; stack.push(start); seen[start] = 1;
+      while (stack.length) {
+        var p = stack.pop();
+        var px = p % w, py = (p / w) | 0;
+        area++;
+        if (px < x0) x0 = px; if (px > x1) x1 = px;
+        if (py < y0) y0 = py; if (py > y1) y1 = py;
+        // 8-connectivity: pen strokes often join only at a diagonal pixel
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            var nx = px + dx, ny = py + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            var q = ny * w + nx;
+            if (mask[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+          }
+        }
+      }
+      comps.push({ x0: x0, y0: y0, x1: x1 + 1, y1: y1 + 1, area: area });
+    }
+    return comps;
+  }
+
+  function tintGlyph(d, c, base, xh, targetXH) {
+    var pad = 3;
+    var x0 = Math.max(0, c.x0 - pad), y0 = Math.max(0, c.y0 - pad);
+    var x1 = Math.min(d.w, c.x1 + pad), y1 = Math.min(d.h, c.y1 + pad);
+    var w = x1 - x0, h = y1 - y0;
+    if (w < 3 || h < 4) return null;
+    var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    var ctx = cv.getContext('2d');
+    ctx.drawImage(d.canvas, x0, y0, w, h, 0, 0, w, h);
+    var id = ctx.getImageData(0, 0, w, h);
+    var px = id.data;
+    for (var y = 0; y < h; y++) {
+      for (var x = 0; x < w; x++) {
+        var idx = (y * w + x) * 4;
+        if (d.mask[(y0 + y) * d.w + (x0 + x)]) {
+          var lum = 0.299 * px[idx] + 0.587 * px[idx + 1] + 0.114 * px[idx + 2];
+          var strength = Math.max(0, Math.min(1, (205 - lum) / 130));
+          px[idx] = 46; px[idx + 1] = 61; px[idx + 2] = 158;
+          px[idx + 3] = Math.round(255 * (0.5 + 0.5 * strength));
+        } else { px[idx + 3] = 0; }
+      }
+    }
+    ctx.putImageData(id, 0, 0);
+    var scale = targetXH / xh;
+    var drop = (c.y1 - base) / xh * targetXH;
+    return { src: cv.toDataURL('image/png'),
+             h: Math.max(6, Math.round(h * scale)), w: Math.max(3, Math.round(w * scale)),
+             dy: Math.max(-5, Math.min(12, Math.round(drop))) };
+  }
+
+  function cloneFromSheet(img) {
+    var d = inkData(img);
+    var raw = componentsOf(d.mask, d.w, d.h);
+    var comps = raw.filter(function (c) {
+      var cw = c.x1 - c.x0, chh = c.y1 - c.y0;
+      return c.area >= 14 && cw <= d.w * 0.16 && chh <= d.h * 0.16 && cw >= 3 && chh >= 5;
+    });
+    if (comps.length < 30) return null;
+    // group strokes that belong to one letter: pieces whose boxes nearly
+    // touch (i-dots, the bars of E / F / T, a split crossbar) merge into one
+    // glyph, while properly spaced letters stay apart.
+    var preHs = comps.map(function (c) { return c.y1 - c.y0; }).sort(function (a, b) { return a - b; });
+    var medPre = preHs[preHs.length >> 1] || 30;
+    var PADG = Math.max(8, Math.min(16, Math.round(medPre * 0.32)));
+    var groups = comps.map(function (c) { return { x0: c.x0, y0: c.y0, x1: c.x1, y1: c.y1, area: c.area }; });
+    var changed = true;
+    while (changed) {
+      changed = false;
+      outer:
+      for (var i = 0; i < groups.length; i++) {
+        for (var j = i + 1; j < groups.length; j++) {
+          var a = groups[i], b = groups[j];
+          if (a.x0 - PADG <= b.x1 && b.x0 - PADG <= a.x1 && a.y0 - PADG <= b.y1 && b.y0 - PADG <= a.y1) {
+            a.x0 = Math.min(a.x0, b.x0); a.y0 = Math.min(a.y0, b.y0);
+            a.x1 = Math.max(a.x1, b.x1); a.y1 = Math.max(a.y1, b.y1);
+            a.area += b.area;
+            groups.splice(j, 1);
+            changed = true;
+            break outer;
+          }
+        }
+      }
+    }
+    var merged = groups;
+    // drop leftover specks (unmerged dots/bars) so they cannot eat a letter slot
+    var preH = merged.map(function (c) { return c.y1 - c.y0; }).sort(function (a, b) { return a - b; });
+    var preMed = preH[preH.length >> 1] || 30;
+    merged = merged.filter(function (c) {
+      return !((c.y1 - c.y0) < preMed * 0.35 && (c.x1 - c.x0) < preMed * 0.35);
+    });
+    // cluster into lines by centre-y, then reading order
+    merged.sort(function (a, b) { return ((a.y0 + a.y1) / 2) - ((b.y0 + b.y1) / 2) || (a.x0 - b.x0); });
+    var heights = merged.map(function (c) { return c.y1 - c.y0; }).sort(function (a, b) { return a - b; });
+    var medH = heights[heights.length >> 1] || 30;
+    var lines = [];
+    merged.forEach(function (c) {
+      var cy = (c.y0 + c.y1) / 2;
+      if (lines.length && cy - lines[lines.length - 1].cy <= medH * 0.6) {
+        var L = lines[lines.length - 1];
+        L.items.push(c);
+        L.cy = L.items.reduce(function (s, q) { return s + (q.y0 + q.y1) / 2; }, 0) / L.items.length;
+      } else lines.push({ cy: cy, items: [c] });
+    });
+    var glyphs = [];
+    lines.forEach(function (L) {
+      L.items.sort(function (a, b) { return a.x0 - b.x0; });
+      var bottoms = L.items.map(function (c) { return c.y1; }).sort(function (a, b) { return a - b; });
+      L.base = bottoms[Math.min(bottoms.length - 1, Math.floor(bottoms.length * 0.85))];
+      L.items.forEach(function (c) { glyphs.push({ c: c, base: L.base }); });
+    });
+    // map onto the expected sequence: A-Z, a-z, 0-9, each written 1-3 times
+    var SEQ = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    var reps = Math.max(1, Math.min(3, Math.round(glyphs.length / SEQ.length)));
+    var expected = [];
+    for (var s = 0; s < SEQ.length; s++) for (var r2 = 0; r2 < reps; r2++) expected.push(SEQ[s]);
+    var n = Math.min(glyphs.length, expected.length);
+    // her x-height, from the small letters' first copies
+    var xhSet = 'acemnorsuvwxz';
+    var xhs = [];
+    for (var k = 0; k < n; k++) {
+      if (xhSet.indexOf(expected[k]) >= 0 && k % reps === 0) xhs.push(glyphs[k].c.y1 - glyphs[k].c.y0);
+    }
+    xhs.sort(function (a, b) { return a - b; });
+    var xh = xhs.length ? xhs[xhs.length >> 1] : medH * 0.6;
+    var TARGET_XH = 13; // matches the page's body writing size
+    var out = {};
+    for (var m = 0; m < n; m++) {
+      var entry = tintGlyph(d, glyphs[m].c, glyphs[m].base, xh, TARGET_XH);
+      if (entry) (out[expected[m]] = out[expected[m]] || []).push(entry);
+    }
+    return { set: out, count: n, reps: reps };
+  }
+
+  var cloneInput = document.getElementById('cloneFile');
+  if (cloneInput) cloneInput.addEventListener('change', function () {
+    var f = cloneInput.files && cloneInput.files[0];
+    if (!f) return;
+    setStatus('cloneStatus', 'Photo padh rahe hain... akshar kaat rahe hain...');
+    loadImageFile(f).then(function (img) {
+      var res = cloneFromSheet(img);
+      if (!res || res.count < 30) {
+        setStatus('cloneStatus', 'Is photo se akshar saaf nahi mile. Photo seedhi, paas se aur achhi roshni me lo — har akshar alag-alag likha ho.');
+        return;
+      }
+      CLONE = res.set;
+      try { localStorage.setItem('hercopyClone', JSON.stringify(CLONE)); } catch (e) {}
+      var uc = document.getElementById('useClone'); if (uc) uc.checked = true;
+      var sb = document.getElementById('saveCloneBtn'); if (sb) sb.disabled = false;
+      setStatus('cloneStatus', 'Ho gaya! ' + res.count + ' akshar clone ho gaye (har akshar ' + res.reps + ' style). Ab jo text likhoge, page isi handwriting me banega.');
+      buildPages();
+    }).catch(function () { setStatus('cloneStatus', 'Photo khul nahi payi — dusri photo try karo.'); });
+  });
+
+  var saveBtn = document.getElementById('saveCloneBtn');
+  if (saveBtn) saveBtn.addEventListener('click', function () {
+    if (!CLONE) return;
+    var blob = new Blob([JSON.stringify(CLONE)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'meri-handwriting.json';
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 4000);
+  });
+
+  var loadCloneInput = document.getElementById('loadCloneFile');
+  if (loadCloneInput) loadCloneInput.addEventListener('change', function () {
+    var f = loadCloneInput.files && loadCloneInput.files[0];
+    if (!f) return;
+    f.text().then(function (t) {
+      try {
+        CLONE = JSON.parse(t);
+        try { localStorage.setItem('hercopyClone', t); } catch (e) {}
+        var uc = document.getElementById('useClone'); if (uc) uc.checked = true;
+        var sb = document.getElementById('saveCloneBtn'); if (sb) sb.disabled = false;
+        setStatus('cloneStatus', 'Handwriting file load ho gayi. Ab text isi style me banega.');
+        buildPages();
+      } catch (e) { setStatus('cloneStatus', 'Ye file sahi nahi lagi.'); }
+    });
+  });
+
+  var useCloneBox = document.getElementById('useClone');
+  if (useCloneBox) useCloneBox.addEventListener('change', function () { buildPages(); });
+
+  if (CLONE) {
+    var sb2 = document.getElementById('saveCloneBtn'); if (sb2) sb2.disabled = false;
+    setStatus('cloneStatus', 'Tumhari clone ki hui handwriting pehle se saved hai — text usi me banega. Nayi photo se badal sakte ho.');
+  }
+
+  // ---------- page photo -> text (OCR) -> re-rendered in the cloned hand ----------
+  // The OCR engine is vendored inside this site (ocr/ folder) — no outside
+  // server is contacted, so page reading also works on slow connections.
+  var tessLoading = null;
+  var tessWorker = null;
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve();
+    if (tessLoading) return tessLoading;
+    tessLoading = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = 'ocr/tesseract.min.js';
+      s.onload = resolve; s.onerror = reject;
+      document.head.appendChild(s);
+    });
+    return tessLoading;
+  }
+  function getOcrWorker() {
+    if (tessWorker) return tessWorker;
+    tessWorker = loadTesseract().then(function () {
+      return Tesseract.createWorker('eng', (Tesseract.OEM ? Tesseract.OEM.LSTM_ONLY : 1), {
+        workerPath: 'ocr/worker.min.js',
+        corePath: 'ocr/',
+        langPath: 'ocr/',
+        cacheMethod: 'none'
+      });
+    });
+    return tessWorker;
+  }
+
+  var pageInput = document.getElementById('pageFile');
+  if (pageInput) pageInput.addEventListener('change', function () {
+    var f = pageInput.files && pageInput.files[0];
+    if (!f) return;
+    setStatus('pageStatus', 'Page padh rahe hain... thoda time lagega (pehli baar engine load hota hai).');
+    getOcrWorker().then(function (worker) {
+      return worker.recognize(f);
+    }).then(function (res) {
+      var text = ((res && res.data && res.data.text) || '').replace(/\n{3,}/g, '\n\n').trim();
+      if (!text) { setStatus('pageStatus', 'Is photo se text nahi padh paye. Photo seedhi aur saaf ho to better chalega.'); return; }
+      document.getElementById('src').value = text;
+      setStatus('pageStatus', 'Text upar wale box me aa gaya hai — galtiyan sudhar lo, phir "Pages banao" dabao. Poora page tumhari handwriting me ban jayega.');
+      buildPages();
+    }).catch(function () { setStatus('pageStatus', 'Text padhne me dikkat aayi. Dobara try karo.'); });
+  });
 
   function buildPages() {
     var raw = document.getElementById('src').value.replace(/\r\n/g, '\n');
