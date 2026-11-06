@@ -55,8 +55,8 @@
          box-shadow: 0 4px 24px rgba(60,50,20,.14); overflow: hidden; flex: 0 0 auto; }
   .frame { position: absolute; inset: 26px; border: 2px solid var(--frame-green); pointer-events: none; }
   .marginLine { position: absolute; top: 26px; bottom: 26px; left: 64px; width: 2px; background: var(--frame-green); pointer-events: none; }
-  .sheet { position: absolute; top: 46px; bottom: 40px; left: 84px; right: 46px; font-family: 'HerHand', cursive; }
-  .pageno { position: absolute; bottom: 34px; right: 52px; font-family: 'HerHand', cursive; font-size: 15px; color: var(--ink-blue); opacity: .75; }
+  .sheet { position: absolute; top: 46px; bottom: 40px; left: 84px; right: 46px; font-family: var(--hand-font, 'HerHand'), cursive; }
+  .pageno { position: absolute; bottom: 34px; right: 52px; font-family: var(--hand-font, 'HerHand'), cursive; font-size: 15px; color: var(--ink-blue); opacity: .75; }
   .detailsBlock { color: var(--ink-blue); font-size: 19px; line-height: 1.65; margin-bottom: 10px; }
   .heading { color: var(--ink-red); font-size: 27px; text-align: center; text-decoration: underline; text-underline-offset: 5px; margin: 2px 0 14px; line-height: 1.3; }
   .line { color: var(--ink-blue); font-size: 21px; line-height: 36px; white-space: nowrap; }
@@ -106,7 +106,19 @@
     </div>
 
     <div class="card" style="margin-top:18px">
-      <label class="lbl">Apni handwriting clone karo</label>
+      <label class="lbl">Apna handwriting font lagao — sabse pakka tareeka</label>
+      <p class="hint" style="margin:0 0 10px">Calligraphr par handwriting ka asli font banta hai — har akshar apne alag dabbe me likha jata hai, isliye ek bhi akshar idhar-udhar (gibberish) nahi hota. Steps: 1) Neeche se Calligraphr kholo, free account banao, template print karke pen se bharo. 2) Uski photo wahi upload karke font (.ttf) download karo — free wale me A–Z, a–z, 0–9 sab aa jata hai. 3) Wo .ttf file yahan de do — phir site hamesha usi handwriting me pages banayegi, aur font is phone par save rahega.</p>
+      <div class="actions" style="margin-top:0">
+        <a class="upBtn" href="https://www.calligraphr.com" target="_blank" rel="noopener" style="text-decoration:none">Calligraphr kholo</a>
+        <label class="upBtn" for="fontFile">Font file (.ttf) do</label>
+        <input type="file" id="fontFile" accept=".ttf,.otf,font/ttf,font/otf" hidden>
+        <button id="fontResetBtn" type="button" style="display:none">Default handwriting wapas karo</button>
+      </div>
+      <p class="hint" id="fontStatus"></p>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <label class="lbl">Photo se clone karo (doosra tareeka)</label>
       <p class="hint" style="margin:0 0 10px">Ek saaf page par A–Z, a–z aur 0–9 bade-bade, alag-alag likho — har akshar sirf EK baar, sahi order me (pehle A se Z, phir a se z, phir 0 se 9). Uski photo yahan do — site har akshar kaat kar tumhari apni handwriting bana legi. Aksharon ke size bhi waise hi rahenge jaise tum likhte ho — bade akshar bade, chhote chhote.</p>
       <div class="actions" style="margin-top:0">
         <label class="upBtn" for="cloneFile">Alphabet wali photo do</label>
@@ -201,6 +213,7 @@
       }
       if (n) return sum / n + 1.5;
     }
+    if (customFace && FONTW && FONTW[ch] !== undefined) return FONTW[ch];
     return 10.4;
   }
   function textW(s) {
@@ -219,6 +232,80 @@
     if (cur) lines.push(cur);
     return lines;
   }
+
+  // ---------- Calligraphr font: a real .ttf made from her hand ----------
+  // A font file cannot scramble letters the way cut-out pieces can, so this
+  // is the primary path. The uploaded font is kept in IndexedDB on this
+  // device and re-applied automatically on the next visit.
+  var customFace = null;
+  var FONTW = null;
+  // Measure the uploaded font's real letter widths so line wrapping stays
+  // inside the frame even when the font is wider than the default hand.
+  function measureFontWidths() {
+    try {
+      var ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = '21px HerHandCustom';
+      FONTW = {};
+      var chars = ' ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:!?()-\'"';
+      for (var i = 0; i < chars.length; i++) FONTW[chars[i]] = ctx.measureText(chars[i]).width;
+    } catch (e) { FONTW = null; }
+  }
+  function idbOpen() {
+    return new Promise(function (resolve, reject) {
+      var rq = indexedDB.open('hercopy', 1);
+      rq.onupgradeneeded = function () { rq.result.createObjectStore('files'); };
+      rq.onsuccess = function () { resolve(rq.result); };
+      rq.onerror = function () { reject(rq.error); };
+    });
+  }
+  function idbRun(mode, fn) {
+    return idbOpen().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var tx = db.transaction('files', mode);
+        var rq = fn(tx.objectStore('files'));
+        if (rq) { rq.onsuccess = function () { resolve(rq.result); }; rq.onerror = function () { reject(rq.error); }; }
+        tx.oncomplete = function () { if (!rq) resolve(); };
+        tx.onerror = function () { reject(tx.error); };
+      });
+    });
+  }
+  function applyCustomFont(buf, name) {
+    var face = new FontFace('HerHandCustom', buf);
+    return face.load().then(function (loaded) {
+      if (customFace) { try { document.fonts.delete(customFace); } catch (e) {} }
+      customFace = loaded;
+      document.fonts.add(loaded);
+      measureFontWidths();
+      document.documentElement.style.setProperty('--hand-font', "'HerHandCustom'");
+      var uc = document.getElementById('useClone'); if (uc) uc.checked = false;
+      var rb = document.getElementById('fontResetBtn'); if (rb) rb.style.display = '';
+      setStatus('fontStatus', 'Ho gaya! "' + name + '" font lag gaya — ab saare pages usi handwriting me banenge. (Photo-clone band kar diya hai, ab font hi chalega.)');
+      buildPages();
+    });
+  }
+  var fontInput = document.getElementById('fontFile');
+  if (fontInput) fontInput.addEventListener('change', function () {
+    var f = fontInput.files && fontInput.files[0];
+    if (!f) return;
+    setStatus('fontStatus', 'Font laga rahe hain...');
+    f.arrayBuffer().then(function (buf) {
+      return applyCustomFont(buf, f.name).then(function () {
+        return idbRun('readwrite', function (st) { return st.put({ buf: buf, name: f.name }, 'customFont'); }).catch(function () {});
+      });
+    }).catch(function () { setStatus('fontStatus', 'Ye font file nahi chali — Calligraphr se download ki hui .ttf file hi do.'); });
+  });
+  var fontReset = document.getElementById('fontResetBtn');
+  if (fontReset) fontReset.addEventListener('click', function () {
+    if (customFace) { try { document.fonts.delete(customFace); } catch (e) {} customFace = null; }
+    document.documentElement.style.removeProperty('--hand-font');
+    fontReset.style.display = 'none';
+    idbRun('readwrite', function (st) { return st.delete('customFont'); }).catch(function () {});
+    setStatus('fontStatus', 'Default handwriting wapas lag gayi.');
+    buildPages();
+  });
+  idbRun('readonly', function (st) { return st.get('customFont'); }).then(function (rec) {
+    if (rec && rec.buf) applyCustomFont(rec.buf, rec.name || 'meri-handwriting.ttf').catch(function () {});
+  }).catch(function () {});
 
   // ---------- handwriting clone: alphabet photo -> per-letter cut-outs ----------
   // The user uploads one photo of A-Z / a-z / 0-9 written big and separate.
