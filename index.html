@@ -106,10 +106,19 @@
     </div>
 
     <div class="card" style="margin-top:18px">
-      <label class="lbl">Apna handwriting font lagao — sabse pakka tareeka</label>
-      <p class="hint" style="margin:0 0 10px">Calligraphr par handwriting ka asli font banta hai — har akshar apne alag dabbe me likha jata hai, isliye ek bhi akshar idhar-udhar (gibberish) nahi hota. Steps: 1) Neeche se Calligraphr kholo, free account banao, template print karke pen se bharo. 2) Uski photo wahi upload karke font (.ttf) download karo — free wale me A–Z, a–z, 0–9 sab aa jata hai. 3) Wo .ttf file yahan de do — phir site hamesha usi handwriting me pages banayegi, aur font is phone par save rahega.</p>
+      <label class="lbl">Apni handwriting ka font banwana hai?</label>
+      <p class="hint" style="margin:0 0 10px">Ek saaf page par A–Z, a–z aur 0–9 apni handwriting me bade-bade, alag-alag likho — har akshar sirf EK baar, sahi order me (pehle A se Z, phir a se z, phir 0 se 9). Uski seedhi photo kheech kar yahan bhej do — photo seedha hamare paas pahunch jayegi, hum tumhari handwriting ka asli font bana denge. Font ready hote hi tumhe bata denge.</p>
       <div class="actions" style="margin-top:0">
-        <a class="upBtn" href="https://www.calligraphr.com" target="_blank" rel="noopener" style="text-decoration:none">Calligraphr kholo</a>
+        <label class="upBtn" for="sheetFile">Alphabet wali photo bhejo</label>
+        <input type="file" id="sheetFile" accept="image/*" hidden>
+      </div>
+      <p class="hint" id="sheetStatus"></p>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <label class="lbl">Apna handwriting font lagao</label>
+      <p class="hint" style="margin:0 0 10px">Tumhari handwriting ki font file (.ttf) ready ho jaye to yahan de do — phir site hamesha usi handwriting me pages banayegi, aur font is phone par save rahega (agli baar khud lag jayega).</p>
+      <div class="actions" style="margin-top:0">
         <label class="upBtn" for="fontFile">Font file (.ttf) do</label>
         <input type="file" id="fontFile" accept=".ttf,.otf,font/ttf,font/otf" hidden>
         <button id="fontResetBtn" type="button" style="display:none">Default handwriting wapas karo</button>
@@ -528,6 +537,30 @@
     }
     return { set: out, count: n, reps: reps };
   }
+
+  // ---- Send the alphabet sheet photo to us (Supabase storage) ----
+  var SB_URL = 'https://hjdyvaetxhvxzgsdlibt.supabase.co';
+  var SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhqZHl2YWV0eGh2eHpnc2RsaWJ0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI0OTg3ODEsImV4cCI6MjEwODA3NDc4MX0.7M1BKl6VIKeKP1M1-qE-nVdi-2IaDA7OQ2wNlPvNvPg';
+  var sheetInput = document.getElementById('sheetFile');
+  var sheetStatus = document.getElementById('sheetStatus');
+  if (sheetInput) sheetInput.addEventListener('change', function () {
+    var f = sheetInput.files && sheetInput.files[0];
+    if (!f) return;
+    sheetStatus.textContent = 'Photo bhej rahe hain…';
+    var ext = (f.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+    var path = 'sheet-' + Date.now() + '-' + Math.floor(Math.random() * 1e6) + '.' + ext;
+    fetch(SB_URL + '/storage/v1/object/hercopy/' + path, {
+      method: 'POST',
+      headers: { 'apikey': SB_ANON, 'Authorization': 'Bearer ' + SB_ANON, 'Content-Type': f.type || 'image/jpeg', 'x-upsert': 'false' },
+      body: f
+    }).then(function (r) {
+      if (!r.ok) throw new Error('upload ' + r.status);
+      sheetStatus.textContent = 'Photo pahunch gayi ✓ Ab tumhari handwriting ka font banega — ready hote hi bata denge.';
+      sheetInput.value = '';
+    }).catch(function () {
+      sheetStatus.textContent = 'Photo nahi gayi — net check karke dobara try karo.';
+    });
+  });
 
   var cloneInput = document.getElementById('cloneFile');
   if (cloneInput) cloneInput.addEventListener('change', function () {
